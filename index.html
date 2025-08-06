@@ -35,16 +35,17 @@
   </div>
 
   <script>
-    //─── いんむごろくC インタプリタ ───────────────────────────
     function interpret(src, print) {
       const lines = src.split(/\r?\n/);
       const stmts = [];
+
       for (let raw of lines) {
         const line = raw.trim();
         if (!line) continue;
-        if (/^いいよ.*?([A-Za-z_]\w*)\(\)ンアー$/.test(line)) {
-          const name = line.match(/^いいよ.*?([A-Za-z_]\w*)\(\)ンアー$/)[1];
-          stmts.push({ type:'func_start', name });
+
+        if (/^いいよ.*?([A-Za-z_]\w*)\((.*?)\) ンアー$/.test(line)) {
+          const m = line.match(/^いいよ.*?([A-Za-z_]\w*)\((.*?)\) ンアー$/);
+          stmts.push({ type:'func_start', name: m[1], args: m[2] });
           continue;
         }
         if (/^おう、考えてやるよ/.test(line)) {
@@ -80,6 +81,7 @@
       }
 
       const env = { functions: {}, vars: {} };
+
       // 関数定義をスキャン
       stmts.forEach((s, i) => {
         if (s.type === 'func_start') env.functions[s.name] = i + 1;
@@ -97,30 +99,32 @@
       function callFunction(name) {
         let i = env.functions[name];
         const loopStack = [];
+
         while (i < stmts.length) {
           const s = stmts[i];
           switch (s.type) {
-            case 'var_decl':
-              {
-                const [v,e] = s.code.split(/\s*=\s*/);
-                env.vars[v] = evalExpr(e);
-              }
-              i++; break;
+            case 'var_decl': {
+              const [v,e] = s.code.split(/\s*=\s*/);
+              env.vars[v] = evalExpr(e);
+              i++;
+              break;
+            }
             case 'if':
               if (evalExpr(s.cond)) { i++; }
               else {
-                while (i < stmts.length && stmts[++i].type !== 'else');
+                while (i < stmts.length && stmts[++i].type !== 'else' && stmts[i].type !== 'func_end');
                 i++;
               }
               break;
             case 'else':
-              i++; break;
+              i++;
+              break;
             case 'while':
               if (evalExpr(s.cond)) {
                 loopStack.push(i);
                 i++;
               } else {
-                // skip to end of loop
+                // skip while block
                 let depth = 1;
                 while (depth && ++i < stmts.length) {
                   if (stmts[i].type === 'while') depth++;
@@ -129,19 +133,27 @@
                 i++;
               }
               break;
-            case 'call':
-              let out = s.args;
-              if (/^".*"$/.test(out)) out = out.slice(1, -1);
-              print(out);
-              i++; break;
+            case 'call': {
+              let args = s.args.split(/\s*,\s*/);
+              let fmt = args.shift();
+              if (/^".*"$/.test(fmt)) fmt = fmt.slice(1, -1);
+              args.forEach(valExpr => {
+                fmt = fmt.replace('%d', evalExpr(valExpr));
+              });
+              print(fmt);
+              i++;
+              break;
+            }
             case 'return':
               return;
             case 'func_end':
               if (loopStack.length) {
                 i = loopStack.pop();
               } else return;
+              break;
             default:
-              i++; break;
+              i++;
+              break;
           }
         }
       }
@@ -151,7 +163,6 @@
       }
     }
 
-    //─── ボタン動作 ───────────────────────────────────────
     document.getElementById('runBtn').onclick = () => {
       const src = document.getElementById('code').value;
       const outEl = document.getElementById('output');
