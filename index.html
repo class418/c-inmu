@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>いんむごろくC Playground</title>
+  <!-- CodeMirror 6 のスタイル -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@codemirror/basic-setup@1.4.0/style.css">
+  <style>
+    body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; }
+    #editor { flex: 1; }
+    #pane { width: 40%; border-left: 1px solid #ccc; box-sizing: border-box; padding: 1em; }
+    #output { white-space: pre; background: #f8f8f8; padding: .5em; height: calc(100% - 2.5em); overflow: auto; }
+    button { margin-bottom: .5em; }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <div id="pane">
+    <button id="runBtn">実行</button>
+    <h3>出力</h3>
+    <div id="output"></div>
+  </div>
+
+  <script type="module">
+    import { basicSetup } from "https://cdn.jsdelivr.net/npm/@codemirror/basic-setup@1.4.0/+esm";
+    import { EditorView } from "https://cdn.jsdelivr.net/npm/@codemirror/view@6.9.3/+esm";
+    import { javascript } from "https://cdn.jsdelivr.net/npm/@codemirror/lang-javascript@6.1.4/+esm";
+
+    //─── インタプリタ本体 ──────────────────────────────────
+    function interpret(src, print) {
+      const lines = src.split(/\r?\n/);
+      const stmts = [];
+      for (let raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (/^いいよ.*?([A-Za-z_]\w*)\(\)ンアー$/.test(line)) {
+          const name = line.match(/^いいよ.*?([A-Za-z_]\w*)\(\)ンアー$/)[1];
+          stmts.push({ type:'func_start', name });
+          continue;
+        }
+        if (/^おう、考えてやるよ/.test(line)) {
+          const expr = line.replace(/^おう、考えてやるよ\s*/, '').replace(/ンアー$/, '');
+          stmts.push({ type:'return', expr });
+          stmts.push({ type:'func_end' });
+          continue;
+        }
+        if (/^ん～いいときには結構いくね/.test(line)) {
+          const rest = line.replace(/^ん～いいときには結構いくね\s*/, '').replace(/ンアー$/, '');
+          stmts.push({ type:'var_decl', code: rest });
+          continue;
+        }
+        if (/^ファッ！？/.test(line)) {
+          const cond = line.replace(/^ファッ！？\s*/, '').replace(/\s*なら$/, '');
+          stmts.push({ type:'if', cond });
+          continue;
+        }
+        if (/^大丈夫でしょ/.test(line)) {
+          stmts.push({ type:'else' });
+          continue;
+        }
+        if (/^暴れんなよ/.test(line)) {
+          const cond = line.replace(/^暴れんなよ\s*/, '').replace(/\s*ずっと$/, '');
+          stmts.push({ type:'while', cond });
+          continue;
+        }
+        if (/^逝くぞ/.test(line)) {
+          const args = line.replace(/^逝くぞ\s*/, '').replace(/ンアー$/, '');
+          stmts.push({ type:'call', args });
+          continue;
+        }
+      }
+
+      const env = { functions: {}, vars: {} };
+      // 関数定義をスキャン
+      for (let i = 0; i < stmts.length; i++) {
+        if (stmts[i].type === 'func_start') {
+          env.functions[stmts[i].name] = i + 1;
+        }
+      }
+
+      function evalExpr(expr) {
+        try {
+          const f = new Function('vars', 'with(vars){return ' + expr + '}');
+          return f(env.vars);
+        } catch {
+          return expr;
+        }
+      }
+
+      // main を呼び出し
+      function callFunction(name) {
+        let i = env.functions[name];
+        const callStack = [];
+        while (i < stmts.length) {
+          const s = stmts[i];
+          switch (s.type) {
+            case 'var_decl':
+              const [v,e] = s.code.split(/\s*=\s*/);
+              env.vars[v] = evalExpr(e);
+              i++; break;
+            case 'if':
+              if (evalExpr(s.cond)) { i++; }
+              else {
+                // false なら次の else へ
+                while (i < stmts.length && stmts[++i].type !== 'else');
+                i++;
+              }
+              break;
+            case 'else':
+              // enter else block
+              i++; break;
+            case 'while':
+              if (evalExpr(s.cond)) {
+                callStack.push(i);
+                i++;
+              } else {
+                // skip block
+                while (i < stmts.length && stmts[++i].type !== 'func_end');
+                i++;
+              }
+              break;
+            case 'call':
+              // simple printf 型
+              let out = s.args;
+              // remove surrounding quotes
+              if (/^".*"$/.test(out)) out = out.slice(1,-1);
+              print(out);
+              i++; break;
+            case 'return':
+              return;
+            case 'func_end':
+              // while ループへ戻る?
+              if (callStack.length) {
+                i = callStack.pop();
+              } else return;
+              break;
+            default:
+              i++; break;
+          }
+        }
+      }
+
+      if (env.functions.main!=null) {
+        callFunction('main');
+      }
+    }
+
+    //─── エディタ＆ボタン設定 ───────────────────────────────
+    const initial = `\
+草 引数 n の二乗を返す
+
+いいよ、来いよ！胸にかけて！ square(n) ンアー
+おう、考えてやるよ n * n ンアー
+
+いいよ、来いよ！胸にかけて！ main() ンアー
+ん～いいときには結構いくね i = 1 ンアー
+暴れんなよ i <= 5 ずっと
+  逝くぞ "square(%d) = %d\\n", i, square(i) ンアー
+  ん～いいときには結構いくね i = i + 1 ンアー
+おう、考えてやるよ 0 ンアー
+`;
+
+    const editor = new EditorView({
+      doc: initial,
+      extensions: [ basicSetup, javascript() ],
+      parent: document.getElementById('editor')
+    });
+
+    document.getElementById('runBtn').addEventListener('click', () => {
+      const src = editor.state.doc.toString();
+      const outEl = document.getElementById('output');
+      outEl.textContent = '';
+      interpret(src, msg => outEl.textContent += msg + "\n");
+    });
+  </script>
+</body>
+</html>
