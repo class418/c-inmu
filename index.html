@@ -3,30 +3,39 @@
 <head>
   <meta charset="UTF-8">
   <title>いんむごろくC Playground</title>
-  <!-- CodeMirror 6 のスタイル -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@codemirror/basic-setup@1.4.0/style.css">
   <style>
     body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; }
-    #editor { flex: 1; }
+    #editor { flex: 1; box-sizing: border-box; padding: 1em; font-family: monospace; font-size: 14px; }
     #pane { width: 40%; border-left: 1px solid #ccc; box-sizing: border-box; padding: 1em; }
     #output { white-space: pre; background: #f8f8f8; padding: .5em; height: calc(100% - 2.5em); overflow: auto; }
+    textarea { width: 100%; height: 100%; resize: none; }
     button { margin-bottom: .5em; }
   </style>
 </head>
 <body>
-  <div id="editor"></div>
+  <div id="editor">
+    <textarea id="code">
+草 引数 n の二乗を返す
+
+いいよ、来いよ！胸にかけて！ square(n) ンアー
+おう、考えてやるよ n * n ンアー
+
+いいよ、来いよ！胸にかけて！ main() ンアー
+ん～いいときには結構いくね i = 1 ンアー
+暴れんなよ i <= 5 ずっと
+  逝くぞ "square(%d) = %d\n", i, square(i) ンアー
+  ん～いいときには結構いくね i = i + 1 ンアー
+おう、考えてやるよ 0 ンアー
+    </textarea>
+  </div>
   <div id="pane">
     <button id="runBtn">実行</button>
     <h3>出力</h3>
     <div id="output"></div>
   </div>
 
-  <script type="module">
-    import { basicSetup } from "https://cdn.jsdelivr.net/npm/@codemirror/basic-setup@1.4.0/+esm";
-    import { EditorView } from "https://cdn.jsdelivr.net/npm/@codemirror/view@6.9.3/+esm";
-    import { javascript } from "https://cdn.jsdelivr.net/npm/@codemirror/lang-javascript@6.1.4/+esm";
-
-    //─── インタプリタ本体 ──────────────────────────────────
+  <script>
+    //─── いんむごろくC インタプリタ ───────────────────────────
     function interpret(src, print) {
       const lines = src.split(/\r?\n/);
       const stmts = [];
@@ -72,11 +81,9 @@
 
       const env = { functions: {}, vars: {} };
       // 関数定義をスキャン
-      for (let i = 0; i < stmts.length; i++) {
-        if (stmts[i].type === 'func_start') {
-          env.functions[stmts[i].name] = i + 1;
-        }
-      }
+      stmts.forEach((s, i) => {
+        if (s.type === 'func_start') env.functions[s.name] = i + 1;
+      });
 
       function evalExpr(expr) {
         try {
@@ -87,91 +94,70 @@
         }
       }
 
-      // main を呼び出し
       function callFunction(name) {
         let i = env.functions[name];
-        const callStack = [];
+        const loopStack = [];
         while (i < stmts.length) {
           const s = stmts[i];
           switch (s.type) {
             case 'var_decl':
-              const [v,e] = s.code.split(/\s*=\s*/);
-              env.vars[v] = evalExpr(e);
+              {
+                const [v,e] = s.code.split(/\s*=\s*/);
+                env.vars[v] = evalExpr(e);
+              }
               i++; break;
             case 'if':
               if (evalExpr(s.cond)) { i++; }
               else {
-                // false なら次の else へ
                 while (i < stmts.length && stmts[++i].type !== 'else');
                 i++;
               }
               break;
             case 'else':
-              // enter else block
               i++; break;
             case 'while':
               if (evalExpr(s.cond)) {
-                callStack.push(i);
+                loopStack.push(i);
                 i++;
               } else {
-                // skip block
-                while (i < stmts.length && stmts[++i].type !== 'func_end');
+                // skip to end of loop
+                let depth = 1;
+                while (depth && ++i < stmts.length) {
+                  if (stmts[i].type === 'while') depth++;
+                  if (stmts[i].type === 'func_end') depth--;
+                }
                 i++;
               }
               break;
             case 'call':
-              // simple printf 型
               let out = s.args;
-              // remove surrounding quotes
-              if (/^".*"$/.test(out)) out = out.slice(1,-1);
+              if (/^".*"$/.test(out)) out = out.slice(1, -1);
               print(out);
               i++; break;
             case 'return':
               return;
             case 'func_end':
-              // while ループへ戻る?
-              if (callStack.length) {
-                i = callStack.pop();
+              if (loopStack.length) {
+                i = loopStack.pop();
               } else return;
-              break;
             default:
               i++; break;
           }
         }
       }
 
-      if (env.functions.main!=null) {
+      if (env.functions.main != null) {
         callFunction('main');
       }
     }
 
-    //─── エディタ＆ボタン設定 ───────────────────────────────
-    const initial = `\
-草 引数 n の二乗を返す
-
-いいよ、来いよ！胸にかけて！ square(n) ンアー
-おう、考えてやるよ n * n ンアー
-
-いいよ、来いよ！胸にかけて！ main() ンアー
-ん～いいときには結構いくね i = 1 ンアー
-暴れんなよ i <= 5 ずっと
-  逝くぞ "square(%d) = %d\\n", i, square(i) ンアー
-  ん～いいときには結構いくね i = i + 1 ンアー
-おう、考えてやるよ 0 ンアー
-`;
-
-    const editor = new EditorView({
-      doc: initial,
-      extensions: [ basicSetup, javascript() ],
-      parent: document.getElementById('editor')
-    });
-
-    document.getElementById('runBtn').addEventListener('click', () => {
-      const src = editor.state.doc.toString();
+    //─── ボタン動作 ───────────────────────────────────────
+    document.getElementById('runBtn').onclick = () => {
+      const src = document.getElementById('code').value;
       const outEl = document.getElementById('output');
       outEl.textContent = '';
       interpret(src, msg => outEl.textContent += msg + "\n");
-    });
+    };
   </script>
 </body>
 </html>
